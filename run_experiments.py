@@ -14,6 +14,7 @@ Experiments:
     5. Transformer rank collapse vs depth  (Noci et al., 2022)
     6. Normalization mode comparison: none/post_ln/pre_ln/rmsnorm
     7. Residual scaling: α=1 vs α=1/√L
+    8. Init variance sweep: effect of weight init scale on rank collapse
 """
 
 import argparse
@@ -29,6 +30,7 @@ from src.experiments import (
     exp5_transformer_rank_collapse,
     exp6_norm_comparison,
     exp7_residual_scaling,
+    exp8_init_variance,
 )
 from src.plotting import (
     plot_cone_effect,
@@ -39,6 +41,7 @@ from src.plotting import (
     plot_transformer_rank_collapse,
     plot_norm_comparison,
     plot_residual_scaling,
+    plot_init_variance,
 )
 from src.models import MLP
 from src.metrics import cosine_similarity_stats
@@ -78,7 +81,7 @@ def run_exp2(out_dir: str = "figures"):
 
     t0 = time.time()
     results = exp2_residual_comparison(
-        d_input=32, d_hidden=32, max_layers=20, n_samples=300, seed=42,
+        d_input=1024, d_hidden=1024, max_layers=20, n_samples=300, seed=42,
     )
     plot_residual_comparison(results, out_dir)
 
@@ -208,6 +211,36 @@ def run_exp7(out_dir: str = "figures"):
     print(f"\n  Time: {time.time() - t0:.1f}s")
 
 
+def run_exp8(out_dir: str = "figures"):
+    """Experiment 8: Init Variance Sweep."""
+    separator("Exp 8: Init Variance Sweep")
+    print("  Reference: Noci et al. (2022) Eq.17-18")
+    print("  Sweeping init variance scale m ∈ {0.1, 0.5, 1, 2, 5, 10} × 1/d")
+    print("  Fixed: d=1024, n_layers=15, n_samples=300\n")
+
+    t0 = time.time()
+    results = exp8_init_variance(
+        d=1024, n_layers=15, n_samples=300,
+        scale_mults=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0],
+        seed=42,
+    )
+    plot_init_variance(results, out_dir)
+
+    scale_mults = results["scale_mults"]
+    for label in ("MLP (no residual)", "ResidualMLP (h+f(h))", "AttnResMLP (attention residual)"):
+        if label not in results:
+            continue
+        data = results[label]
+        xavier_idx = scale_mults.index(1.0)
+        he_idx = scale_mults.index(2.0)
+        print(f"  {label:40s}  Xavier(m=1): cos_sim={data['cos_sim'][xavier_idx]:.3f} "
+              f"eff_rank={data['eff_rank'][xavier_idx]:.1f}  "
+              f"He(m=2): cos_sim={data['cos_sim'][he_idx]:.3f} "
+              f"eff_rank={data['eff_rank'][he_idx]:.1f}")
+
+    print(f"\n  Time: {time.time() - t0:.1f}s")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -221,7 +254,7 @@ def main():
                         help="Output directory for figures.")
     args = parser.parse_args()
 
-    exps = args.exp if args.exp else [1, 2, 3, 4, 5, 6, 7]
+    exps = args.exp if args.exp else [1, 2, 3, 4, 5, 6, 7, 8]
     out_dir = args.out_dir
 
     print("Feature Convergence & Residual Connection Experiments")
@@ -231,7 +264,7 @@ def main():
 
     runners = {
         1: run_exp1, 2: run_exp2, 3: run_exp3, 4: run_exp4,
-        5: run_exp5, 6: run_exp6, 7: run_exp7,
+        5: run_exp5, 6: run_exp6, 7: run_exp7, 8: run_exp8,
     }
     for e in exps:
         if e in runners:

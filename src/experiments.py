@@ -27,6 +27,11 @@ Experiment 7: Residual Scaling α=1 vs α=1/√L
     - For each total depth L, compare α=1 vs α=1/√L residual scaling
     - Measures preservation of input pairwise-similarity structure
     - See Noci et al. (2022) §4 on depth-scaled residuals
+
+Experiment 8: Init Variance Sweep
+    - Fix d=1024, n_layers=15; sweep init variance scale over [0.1/d, 0.5/d, 1/d, 2/d, 5/d, 10/d]
+    - Compare MLP / ResidualMLP / AttnResMLP on cosine similarity and effective rank
+    - See Noci et al. (2022) Eq.17-18: Q/K gradient depends cubically on σ_x^2; V linearly
 """
 
 import numpy as np
@@ -397,5 +402,77 @@ def exp7_residual_scaling(
             cos_sims.append(cosine_similarity_stats(feats)["mean"])
 
         results[label] = {"correlation": corrs, "cos_sim": cos_sims}
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Experiment 8: Init Variance Sweep
+# ---------------------------------------------------------------------------
+
+def exp8_init_variance(
+    d: int = 1024,
+    n_layers: int = 15,
+    n_samples: int = 300,
+    scale_mults: List[float] = None,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """Measure how init variance scale affects rank collapse for each model type.
+
+    For each variance multiplier m, initialises weights with scale = m/d
+    (so Xavier = 1/d corresponds to m=1, He/Kaiming to m=2).
+
+    Metrics at the final layer:
+      - Average pairwise cosine similarity  (↑ = more collapsed)
+      - Effective rank                       (↓ = more collapsed)
+
+    Reference: Noci et al. (2022) Eq.17-18 — the Q/K gradient contribution
+    scales as σ_x^6 (cubic in input variance) while the Value path scales
+    linearly as σ_x^2, so init scale strongly controls collapse speed.
+
+    Args:
+        d:            Hidden dimension.
+        n_layers:     Number of layers (fixed depth).
+        n_samples:    Number of random input vectors.
+        scale_mults:  Variance multipliers to sweep (default: [0.1, 0.5, 1, 2, 5, 10]).
+        seed:         Random seed.
+
+    Returns:
+        Dict with keys 'scale_mults', 'd', and one entry per model label:
+          {'cos_sim': [...], 'eff_rank': [...]}
+    """
+    if scale_mults is None:
+        scale_mults = [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal((n_samples, d))
+
+    model_configs = {
+        "MLP (no residual)":            "mlp",
+        "ResidualMLP (h+f(h))":         "residual_mlp",
+        "AttnResMLP (attention residual)": "attnres_mlp",
+    }
+
+    results: Dict[str, Any] = {"scale_mults": scale_mults, "d": d}
+
+    for label, model_type in model_configs.items():
+        cos_sims, eff_ranks = [], []
+
+        for mult in scale_mults:
+            scale = mult / d
+            model = build_model(
+                model_type,
+                d_input=d,
+                d_hidden=d,
+                n_layers=n_layers,
+                activation="relu",
+                seed=0,
+                init_scale=scale,
+            )
+            feats = model.forward(X, return_intermediates=True)[-1]
+            cos_sims.append(cosine_similarity_stats(feats)["mean"])
+            eff_ranks.append(effective_rank(feats))
+
+        results[label] = {"cos_sim": cos_sims, "eff_rank": eff_ranks}
 
     return results

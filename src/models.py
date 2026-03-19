@@ -85,6 +85,7 @@ class MLP:
         n_layers: int,
         activation: str = "relu",
         seed: int = 0,
+        init_scale: Optional[float] = None,
     ):
         self.d_input = d_input
         self.d_hidden = d_hidden
@@ -97,10 +98,10 @@ class MLP:
         self.layers: List[Tuple[np.ndarray, np.ndarray]] = []
 
         # First layer: d_input -> d_hidden
-        self.layers.append(init_weights(d_input, d_hidden, rng))
+        self.layers.append(init_weights(d_input, d_hidden, rng, scale=init_scale))
         # Hidden layers: d_hidden -> d_hidden
         for _ in range(n_layers - 1):
-            self.layers.append(init_weights(d_hidden, d_hidden, rng))
+            self.layers.append(init_weights(d_hidden, d_hidden, rng, scale=init_scale))
 
     def forward(self, X: np.ndarray, return_intermediates: bool = False):
         """Forward pass.
@@ -151,6 +152,7 @@ class ResidualMLP:
         n_layers: int,
         activation: str = "relu",
         seed: int = 0,
+        init_scale: Optional[float] = None,
     ):
         self.d_input = d_input
         self.d_hidden = d_hidden
@@ -163,11 +165,11 @@ class ResidualMLP:
         self.layers: List[Tuple[np.ndarray, np.ndarray]] = []
 
         # Project input to hidden dim
-        self.proj_in = init_weights(d_input, d_hidden, rng)
+        self.proj_in = init_weights(d_input, d_hidden, rng, scale=init_scale)
 
         # Residual layers: d_hidden -> d_hidden
         for _ in range(n_layers):
-            self.layers.append(init_weights(d_hidden, d_hidden, rng))
+            self.layers.append(init_weights(d_hidden, d_hidden, rng, scale=init_scale))
 
     def forward(self, X: np.ndarray, return_intermediates: bool = False):
         """Forward pass with residual connections."""
@@ -222,6 +224,7 @@ class AttnResMLP:
         n_layers: int,
         activation: str = "relu",
         seed: int = 0,
+        init_scale: Optional[float] = None,
     ):
         self.d_input = d_input
         self.d_hidden = d_hidden
@@ -233,12 +236,12 @@ class AttnResMLP:
         rng = np.random.default_rng(seed)
 
         # Input projection
-        self.proj_in = init_weights(d_input, d_hidden, rng)
+        self.proj_in = init_weights(d_input, d_hidden, rng, scale=init_scale)
 
         # Transform layers
         self.layers: List[Tuple[np.ndarray, np.ndarray]] = []
         for _ in range(n_layers):
-            self.layers.append(init_weights(d_hidden, d_hidden, rng))
+            self.layers.append(init_weights(d_hidden, d_hidden, rng, scale=init_scale))
 
         # Pseudo-query vectors for AttnRes (one per layer, initialized to zero)
         # Zero init => uniform attention at start, as recommended in the paper

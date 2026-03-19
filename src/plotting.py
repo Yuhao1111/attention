@@ -404,3 +404,69 @@ def plot_residual_scaling(
     )
     fig.tight_layout()
     _save(fig, "exp7_residual_scaling", out_dir)
+
+
+# ---------------------------------------------------------------------------
+# Fig 8: Init Variance Sweep
+# ---------------------------------------------------------------------------
+
+def plot_init_variance(
+    results: Dict[str, Any],
+    out_dir: str = "figures",
+):
+    """Two-panel plot: cosine similarity and effective rank vs init variance scale.
+
+    X-axis is the variance multiplier m (where scale = m/d), log-scaled.
+    Three lines per panel, one per model (MLP / ResidualMLP / AttnResMLP).
+
+    Reference: Noci et al. (2022) Eq.17-18.
+    """
+    _setup_style()
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    scale_mults = results["scale_mults"]
+    x_labels = [f"{m}" for m in scale_mults]
+
+    model_labels = [
+        "MLP (no residual)",
+        "ResidualMLP (h+f(h))",
+        "AttnResMLP (attention residual)",
+    ]
+
+    for label in model_labels:
+        if label not in results:
+            continue
+        data = results[label]
+        color = COLORS.get(label, "#333333")
+        axes[0].plot(scale_mults, data["cos_sim"], label=label, color=color,
+                     marker="o", markersize=5)
+        axes[1].plot(scale_mults, data["eff_rank"], label=label, color=color,
+                     marker="s", markersize=5)
+
+    for ax, ylabel, title in [
+        (axes[0], "Avg. Cosine Similarity",
+         "Cosine Similarity vs Init Variance Scale"),
+        (axes[1], "Effective Rank",
+         "Effective Rank vs Init Variance Scale"),
+    ]:
+        ax.set_xscale("log")
+        ax.set_xticks(scale_mults)
+        ax.set_xticklabels(x_labels, fontsize=9)
+        ax.set_xlabel(r"Init variance scale $m$  (scale $= m/d$,  Xavier $= 1/d$)")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend(fontsize=9)
+
+    # Mark Xavier (m=1) and He (m=2) reference lines
+    for ax in axes:
+        ax.axvline(x=1.0, color="gray", linestyle=":", linewidth=1,
+                   label="Xavier (m=1)")
+        ax.axvline(x=2.0, color="goldenrod", linestyle=":", linewidth=1,
+                   label="He (m=2)")
+
+    fig.suptitle(
+        r"Effect of Init Variance on Rank Collapse  (Noci et al., 2022 Eq.17-18)",
+        fontsize=15, fontweight="bold", y=1.02,
+    )
+    fig.tight_layout()
+    _save(fig, "exp8_init_variance", out_dir)
