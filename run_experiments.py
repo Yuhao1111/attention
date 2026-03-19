@@ -81,7 +81,7 @@ def run_exp2(out_dir: str = "figures"):
 
     t0 = time.time()
     results = exp2_residual_comparison(
-        d_input=128, d_hidden=256, max_layers=20, n_samples=300, alpha=0.1, seed=42,
+        d_input=1024, d_hidden=1024, max_layers=20, n_samples=300, seed=42,
     )
     plot_residual_comparison(results, out_dir)
 

@@ -151,7 +151,6 @@ class ResidualMLP:
         d_hidden: int,
         n_layers: int,
         activation: str = "relu",
-        alpha: float = 1.0,
         seed: int = 0,
         init_scale: Optional[float] = None,
         alpha: float = 1.0,
@@ -161,7 +160,6 @@ class ResidualMLP:
         self.n_layers = n_layers
         self.activation_name = activation
         self.act_fn = ACTIVATIONS[activation]
-        self.alpha = alpha
         self.seed = seed
         self.alpha = alpha  # Residual scaling: h = alpha * h + f(h)
 
