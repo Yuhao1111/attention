@@ -99,6 +99,7 @@ def exp2_residual_comparison(
     d_hidden: int = 32,
     max_layers: int = 25,
     n_samples: int = 500,
+    alpha: float = 1.0,
     seed: int = 42,
 ) -> Dict[str, Any]:
     """Compare rank collapse across model types.
@@ -115,6 +116,7 @@ def exp2_residual_comparison(
         d_hidden:   Hidden dimension.
         max_layers: Maximum depth.
         n_samples:  Number of input samples.
+        alpha:      Residual scaling for ResidualMLP, using h + alpha * f(h).
         seed:       Random seed.
 
     Returns:
@@ -123,14 +125,15 @@ def exp2_residual_comparison(
     rng = np.random.default_rng(seed)
     X = rng.standard_normal((n_samples, d_input))
 
-    model_configs = {
-        "MLP (no residual)": "mlp",
-        "ResidualMLP (h+f(h))": "residual_mlp",
-        "AttnResMLP (attention residual)": "attnres_mlp",
-    }
+    alpha_label = f"{alpha:g}"
+    model_configs = [
+        ("MLP (no residual)", "mlp", {}),
+        (f"ResidualMLP (h+{alpha_label}f(h))", "residual_mlp", {"alpha": alpha}),
+        ("AttnResMLP (attention residual)", "attnres_mlp", {}),
+    ]
 
     results = {}
-    for label, model_type in model_configs.items():
+    for label, model_type, model_kwargs in model_configs:
         cos_sims = []
         eff_ranks = []
         rel_residuals = []
@@ -143,6 +146,7 @@ def exp2_residual_comparison(
                 n_layers=n_layers,
                 activation="relu",
                 seed=0,
+                **model_kwargs,
             )
             intermediates = model.forward(X, return_intermediates=True)
 

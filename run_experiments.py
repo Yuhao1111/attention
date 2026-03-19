@@ -77,11 +77,12 @@ def run_exp2(out_dir: str = "figures"):
     """Experiment 2: Residual Connection Comparison."""
     separator("Exp 2: Residual Connection Comparison")
     print("  Comparing: Plain MLP / ResidualMLP / AttnResMLP")
-    print("  Metrics: cosine similarity, effective rank, relative residual\n")
+    print("  Metrics: cosine similarity, effective rank, relative residual")
+    print("  ResidualMLP uses h + alpha * f(h), with alpha=1.0\n")
 
     t0 = time.time()
     results = exp2_residual_comparison(
-        d_input=1024, d_hidden=1024, max_layers=20, n_samples=300, seed=42,
+        d_input=128, d_hidden=256, max_layers=20, n_samples=300, alpha=0.1, seed=42,
     )
     plot_residual_comparison(results, out_dir)
 

@@ -139,7 +139,7 @@ class MLP:
 class ResidualMLP:
     """MLP with standard residual (skip) connections.
 
-    Update rule:  h_l = h_{l-1} + f_{l-1}(h_{l-1})
+    Update rule:  h_l = h_{l-1} + alpha * f_{l-1}(h_{l-1})
 
     Expected to mitigate the cone effect / rank collapse.
     See: He et al. (2015), Dong et al. (2021) §3.1
@@ -151,6 +151,7 @@ class ResidualMLP:
         d_hidden: int,
         n_layers: int,
         activation: str = "relu",
+        alpha: float = 1.0,
         seed: int = 0,
         init_scale: Optional[float] = None,
     ):
@@ -159,6 +160,7 @@ class ResidualMLP:
         self.n_layers = n_layers
         self.activation_name = activation
         self.act_fn = ACTIVATIONS[activation]
+        self.alpha = alpha
         self.seed = seed
 
         rng = np.random.default_rng(seed)
@@ -183,7 +185,7 @@ class ResidualMLP:
             residual = h
             h = h @ W.T + b
             h = self.act_fn(h)
-            h = residual + h  # Skip connection
+            h = residual + self.alpha * h
             if return_intermediates:
                 intermediates.append(h)
 
@@ -193,6 +195,7 @@ class ResidualMLP:
         return (
             f"ResidualMLP(d_in={self.d_input}, d_hid={self.d_hidden}, "
             f"layers={self.n_layers}, act={self.activation_name}, "
+            f"alpha={self.alpha}, "
             f"seed={self.seed})"
         )
 
