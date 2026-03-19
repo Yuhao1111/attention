@@ -76,7 +76,7 @@ def run_exp1(out_dir: str = "figures"):
 def run_exp2(out_dir: str = "figures"):
     """Experiment 2: Residual Connection Comparison."""
     separator("Exp 2: Residual Connection Comparison")
-    print("  Comparing: Plain MLP / ResidualMLP / AttnResMLP")
+    print("  Comparing: MLP / ResidualMLP(α=1) / ResidualMLP(α=1/√L) / AttnResMLP / Pure Self-Attention")
     print("  Metrics: cosine similarity, effective rank, relative residual\n")
 
     t0 = time.time()

@@ -18,12 +18,19 @@ matplotlib.use("Agg")
 # ---------------------------------------------------------------------------
 
 COLORS = {
-    "MLP (no residual)": "#e74c3c",
-    "ResidualMLP (h+f(h))": "#2ecc71",
+    # Exp 2 (5-model comparison)
+    "MLP (no residual)":        "#e74c3c",
+    "ResidualMLP (α=1)":        "#2ecc71",
+    "ResidualMLP (α=1/√L)":     "#27ae60",
+    "AttnResMLP":               "#3498db",
+    "Pure Self-Attention":      "#8e44ad",
+    # Exp 3
+    "SAN (no residual)":        "#e74c3c",
+    "SAN + skip":               "#2ecc71",
+    "SAN + AttnRes":            "#3498db",
+    # Exp 8 (legacy labels kept for backward compat)
+    "ResidualMLP (h+f(h))":         "#2ecc71",
     "AttnResMLP (attention residual)": "#3498db",
-    "SAN (no residual)": "#e74c3c",
-    "SAN + skip": "#2ecc71",
-    "SAN + AttnRes": "#3498db",
 }
 
 NORM_COLORS = {

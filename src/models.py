@@ -153,6 +153,7 @@ class ResidualMLP:
         activation: str = "relu",
         seed: int = 0,
         init_scale: Optional[float] = None,
+        alpha: float = 1.0,
     ):
         self.d_input = d_input
         self.d_hidden = d_hidden
@@ -160,6 +161,7 @@ class ResidualMLP:
         self.activation_name = activation
         self.act_fn = ACTIVATIONS[activation]
         self.seed = seed
+        self.alpha = alpha  # Residual scaling: h = alpha * h + f(h)
 
         rng = np.random.default_rng(seed)
         self.layers: List[Tuple[np.ndarray, np.ndarray]] = []
@@ -183,7 +185,7 @@ class ResidualMLP:
             residual = h
             h = h @ W.T + b
             h = self.act_fn(h)
-            h = residual + h  # Skip connection
+            h = self.alpha * residual + h  # Scaled skip connection
             if return_intermediates:
                 intermediates.append(h)
 
@@ -193,7 +195,7 @@ class ResidualMLP:
         return (
             f"ResidualMLP(d_in={self.d_input}, d_hid={self.d_hidden}, "
             f"layers={self.n_layers}, act={self.activation_name}, "
-            f"seed={self.seed})"
+            f"alpha={self.alpha:.3f}, seed={self.seed})"
         )
 
 
@@ -315,6 +317,93 @@ class AttnResMLP:
 
 
 # ---------------------------------------------------------------------------
+# Pure Self-Attention  (no residual, no FFN)
+# ---------------------------------------------------------------------------
+
+class PureSelfAttention:
+    """Pure self-attention layers without any residual connections.
+
+    Each layer computes:
+        h_{l+1} = softmax(h_l W_Q (h_l W_K)^T / sqrt(d)) h_l W_V W_O
+
+    No skip connections are applied.  This is the degenerate architecture
+    studied by Dong et al. (2021, ICML), who prove that the rank of h_l
+    collapses doubly-exponentially with depth:
+        rank(h_l) ≤ n / 2^l  (approximately)
+
+    All weight matrices are Xavier-initialized: W ~ N(0, 1/d).
+
+    The model accepts the same forward(X, return_intermediates=True)
+    interface as MLP / ResidualMLP / AttnResMLP for drop-in comparison.
+    """
+
+    def __init__(
+        self,
+        d_input: int,
+        d_hidden: int,
+        n_layers: int,
+        activation: str = "relu",   # accepted for API compatibility, unused
+        seed: int = 0,
+        init_scale: Optional[float] = None,
+    ):
+        self.d_input = d_input
+        self.d_hidden = d_hidden
+        self.n_layers = n_layers
+        self.seed = seed
+
+        rng = np.random.default_rng(seed)
+        scale = init_scale if init_scale is not None else 1.0 / d_hidden
+
+        # Input projection (d_input -> d_hidden)
+        self.W_in = rng.normal(0, np.sqrt(1.0 / d_input), (d_hidden, d_input))
+
+        # Per-layer attention matrices
+        self.blocks: List[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
+        for _ in range(n_layers):
+            W_Q = rng.normal(0, np.sqrt(scale), (d_hidden, d_hidden))
+            W_K = rng.normal(0, np.sqrt(scale), (d_hidden, d_hidden))
+            W_V = rng.normal(0, np.sqrt(scale), (d_hidden, d_hidden))
+            W_O = rng.normal(0, np.sqrt(scale), (d_hidden, d_hidden))
+            self.blocks.append((W_Q, W_K, W_V, W_O))
+
+    def _attn(
+        self,
+        X: np.ndarray,
+        W_Q: np.ndarray,
+        W_K: np.ndarray,
+        W_V: np.ndarray,
+        W_O: np.ndarray,
+    ) -> np.ndarray:
+        Q = X @ W_Q.T
+        K = X @ W_K.T
+        V = X @ W_V.T
+        scale = np.sqrt(self.d_hidden)
+        scores = Q @ K.T / scale                        # (N, N)
+        scores -= scores.max(axis=-1, keepdims=True)    # numerical stability
+        weights = np.exp(scores)
+        weights /= weights.sum(axis=-1, keepdims=True)
+        return weights @ V @ W_O.T                      # (N, d_hidden)
+
+    def forward(self, X: np.ndarray, return_intermediates: bool = False):
+        """Forward pass: pure self-attention, no residual."""
+        h = X @ self.W_in.T                             # (N, d_hidden)
+        intermediates = [h] if return_intermediates else None
+
+        for W_Q, W_K, W_V, W_O in self.blocks:
+            h = self._attn(h, W_Q, W_K, W_V, W_O)     # No skip connection
+            if return_intermediates:
+                intermediates.append(h)
+
+        return intermediates if return_intermediates else h
+
+    def __repr__(self):
+        return (
+            f"PureSelfAttention(d_in={self.d_input}, d_hid={self.d_hidden}, "
+            f"layers={self.n_layers}, seed={self.seed})"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -322,6 +411,7 @@ MODEL_REGISTRY = {
     "mlp": MLP,
     "residual_mlp": ResidualMLP,
     "attnres_mlp": AttnResMLP,
+    "pure_self_attn": PureSelfAttention,
 }
 
 

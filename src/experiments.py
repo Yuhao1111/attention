@@ -37,7 +37,7 @@ Experiment 8: Init Variance Sweep
 import numpy as np
 from typing import Dict, List, Any
 
-from .models import MLP, ResidualMLP, AttnResMLP, TransformerEncoder, build_model, ACTIVATIONS
+from .models import MLP, ResidualMLP, AttnResMLP, PureSelfAttention, TransformerEncoder, build_model, ACTIVATIONS
 from .metrics import (
     cosine_similarity_stats,
     effective_rank,
@@ -95,20 +95,28 @@ def exp1_cone_effect(
 # ---------------------------------------------------------------------------
 
 def exp2_residual_comparison(
-    d_input: int = 32,
-    d_hidden: int = 32,
-    max_layers: int = 25,
-    n_samples: int = 500,
+    d_input: int = 1024,
+    d_hidden: int = 1024,
+    max_layers: int = 20,
+    n_samples: int = 300,
     seed: int = 42,
 ) -> Dict[str, Any]:
-    """Compare rank collapse across model types.
+    """Compare rank collapse across five model types.
 
     Measures:
     - Average cosine similarity (cone effect)
     - Effective rank
     - Relative residual (token uniformity)
 
-    across depths for MLP, ResidualMLP, and AttnResMLP.
+    across depths for:
+      MLP / ResidualMLP(α=1) / ResidualMLP(α=1/√L) / AttnResMLP / PureSelfAttention
+
+    The α=1/√L variant follows Noci et al. (2022) §4: for a network of
+    total depth L, every skip connection is scaled by 1/√L so that the
+    effective per-layer contribution stays constant regardless of depth.
+
+    The Pure Self-Attention baseline (no residual, no FFN) exhibits
+    doubly-exponential rank collapse as proved by Dong et al. (2021).
 
     Args:
         d_input:    Input dimension.
@@ -118,47 +126,35 @@ def exp2_residual_comparison(
         seed:       Random seed.
 
     Returns:
-        Dict mapping model_name -> dict of metric lists.
+        Dict mapping model_name -> {'cos_sim', 'eff_rank', 'rel_residual'}.
     """
     rng = np.random.default_rng(seed)
     X = rng.standard_normal((n_samples, d_input))
 
-    model_configs = {
-        "MLP (no residual)": "mlp",
-        "ResidualMLP (h+f(h))": "residual_mlp",
-        "AttnResMLP (attention residual)": "attnres_mlp",
-    }
-
     results = {}
-    for label, model_type in model_configs.items():
-        cos_sims = []
-        eff_ranks = []
-        rel_residuals = []
+    common = dict(d_input=d_input, d_hidden=d_hidden, activation="relu", seed=0)
 
-        for n_layers in range(1, max_layers + 1):
-            model = build_model(
-                model_type,
-                d_input=d_input,
-                d_hidden=d_hidden,
-                n_layers=n_layers,
-                activation="relu",
-                seed=0,
-            )
-            intermediates = model.forward(X, return_intermediates=True)
-
-            # Use the last layer's features
-            feats = intermediates[-1]
-
-            stats = cosine_similarity_stats(feats)
-            cos_sims.append(stats["mean"])
-            eff_ranks.append(effective_rank(feats))
-            rel_residuals.append(relative_residual(feats))
-
-        results[label] = {
-            "cos_sim": cos_sims,
-            "eff_rank": eff_ranks,
-            "rel_residual": rel_residuals,
+    for n_layers in range(1, max_layers + 1):
+        builders = {
+            "MLP (no residual)": lambda L=n_layers: MLP(
+                n_layers=L, **common),
+            "ResidualMLP (α=1)": lambda L=n_layers: ResidualMLP(
+                n_layers=L, alpha=1.0, **common),
+            "ResidualMLP (α=1/√L)": lambda L=n_layers: ResidualMLP(
+                n_layers=L, alpha=1.0 / np.sqrt(L), **common),
+            "AttnResMLP": lambda L=n_layers: AttnResMLP(
+                n_layers=L, **common),
+            "Pure Self-Attention": lambda L=n_layers: PureSelfAttention(
+                d_input=d_input, d_hidden=d_hidden, n_layers=L, seed=0),
         }
+
+        for label, build in builders.items():
+            model = build()
+            feats = model.forward(X, return_intermediates=True)[-1]
+            entry = results.setdefault(label, {"cos_sim": [], "eff_rank": [], "rel_residual": []})
+            entry["cos_sim"].append(cosine_similarity_stats(feats)["mean"])
+            entry["eff_rank"].append(effective_rank(feats))
+            entry["rel_residual"].append(relative_residual(feats))
 
     return results
 
