@@ -90,8 +90,8 @@ def exp1_cone_effect(
 # ---------------------------------------------------------------------------
 
 def exp2_residual_comparison(
-    d_input: int = 512,
-    d_hidden: int = 512,
+    d_input: int = 32,
+    d_hidden: int = 32,
     max_layers: int = 25,
     n_samples: int = 500,
     seed: int = 42,
