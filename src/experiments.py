@@ -13,12 +13,26 @@ Experiment 2: Residual Connection Mitigation
 Experiment 3: Random Seed Sensitivity
     - Show that different random seeds create different cones
     - Reproduce Fig.2(c) from "Mind the Gap"
+
+Experiment 5: Transformer Rank Collapse vs Depth
+    - Measure cosine similarity, effective rank, relative residual
+      for a TransformerEncoder (pre_ln) as depth grows
+    - Relates to Noci et al. (2022), Theorem 1
+
+Experiment 6: Normalization Mode Comparison
+    - Compare none / post_ln / pre_ln / rmsnorm on rank collapse
+    - Illustrates how layer normalization affects signal propagation
+
+Experiment 7: Residual Scaling α=1 vs α=1/√L
+    - For each total depth L, compare α=1 vs α=1/√L residual scaling
+    - Measures preservation of input pairwise-similarity structure
+    - See Noci et al. (2022) §4 on depth-scaled residuals
 """
 
 import numpy as np
 from typing import Dict, List, Any
 
-from .models import MLP, ResidualMLP, AttnResMLP, build_model, ACTIVATIONS
+from .models import MLP, ResidualMLP, AttnResMLP, TransformerEncoder, build_model, ACTIVATIONS
 from .metrics import (
     cosine_similarity_stats,
     effective_rank,
@@ -216,3 +230,172 @@ def exp4_seed_sensitivity(
         all_features.append(feats)
 
     return {"features": all_features, "seeds": seeds, "input": X}
+
+
+# ---------------------------------------------------------------------------
+# Experiment 5: Transformer Rank Collapse vs Depth
+# ---------------------------------------------------------------------------
+
+def exp5_transformer_rank_collapse(
+    d_model: int = 256,
+    max_layers: int = 24,
+    n_samples: int = 300,
+    norm_mode: str = "pre_ln",
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """Measure rank collapse in TransformerEncoder as depth increases.
+
+    Tracks three complementary metrics at the final layer output:
+      - Average pairwise cosine similarity  (↑ = more collapsed)
+      - Effective rank                       (↓ = more collapsed)
+      - Relative residual                    (↓ = more collapsed)
+
+    Relates to Noci et al. (2022), which shows pure self-attention
+    suffers doubly-exponential rank collapse without residuals/norms.
+
+    Args:
+        d_model:    Token feature dimension.
+        max_layers: Maximum depth to test.
+        n_samples:  Number of random input vectors.
+        norm_mode:  Normalization mode passed to TransformerEncoder.
+        seed:       Random seed for input generation.
+
+    Returns:
+        Dict with keys 'cos_sim', 'eff_rank', 'rel_residual', 'n_layers'.
+    """
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal((n_samples, d_model))
+
+    cos_sims, eff_ranks, rel_residuals = [], [], []
+
+    for n_layers in range(1, max_layers + 1):
+        model = TransformerEncoder(d_model, n_layers, norm_mode=norm_mode, seed=0)
+        feats = model.forward(X)
+
+        cos_sims.append(cosine_similarity_stats(feats)["mean"])
+        eff_ranks.append(effective_rank(feats))
+        rel_residuals.append(relative_residual(feats))
+
+    return {
+        "cos_sim": cos_sims,
+        "eff_rank": eff_ranks,
+        "rel_residual": rel_residuals,
+        "n_layers": list(range(1, max_layers + 1)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Experiment 6: Normalization Mode Comparison
+# ---------------------------------------------------------------------------
+
+def exp6_norm_comparison(
+    d_model: int = 256,
+    max_layers: int = 16,
+    n_samples: int = 300,
+    seed: int = 42,
+) -> Dict[str, Dict]:
+    """Compare rank-collapse behaviour across four normalization strategies.
+
+    Tests:  none / post_ln / pre_ln / rmsnorm
+    Metrics per configuration:
+      - cos_sim, eff_rank, rel_residual (all vs depth)
+
+    Args:
+        d_model:    Feature dimension.
+        max_layers: Maximum depth.
+        n_samples:  Number of random input vectors.
+        seed:       Random seed.
+
+    Returns:
+        Dict  norm_mode  ->  {'cos_sim': [...], 'eff_rank': [...],
+                               'rel_residual': [...]}
+    """
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal((n_samples, d_model))
+
+    results = {}
+    for norm in ("none", "post_ln", "pre_ln", "rmsnorm"):
+        cos_sims, eff_ranks, rel_residuals = [], [], []
+        for n_layers in range(1, max_layers + 1):
+            model = TransformerEncoder(d_model, n_layers, norm_mode=norm, seed=0)
+            feats = model.forward(X)
+            cos_sims.append(cosine_similarity_stats(feats)["mean"])
+            eff_ranks.append(effective_rank(feats))
+            rel_residuals.append(relative_residual(feats))
+        results[norm] = {
+            "cos_sim": cos_sims,
+            "eff_rank": eff_ranks,
+            "rel_residual": rel_residuals,
+        }
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Experiment 7: Residual Scaling  α=1  vs  α=1/√L
+# ---------------------------------------------------------------------------
+
+def exp7_residual_scaling(
+    d_model: int = 256,
+    depths: List[int] = None,
+    n_samples: int = 300,
+    norm_mode: str = "none",
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """Compare α=1 vs α=1/√L residual scaling across different depths.
+
+    For each total depth L we build two TransformerEncoders:
+      - alpha_1:       α1 = α2 = 1.0  (standard residual)
+      - alpha_inv_sqrt: α1 = α2 = 1/√L  (depth-scaled, Noci et al. §4)
+
+    Metric — correlation preservation:
+        corr(cos_sim(input), cos_sim(output))
+    Pearson correlation between the vectors of pairwise cosine
+    similarities at the input and at the output.  A value close to 1
+    means the model preserves the input similarity structure.
+
+    Also records average output cosine similarity (rank-collapse indicator).
+
+    Args:
+        d_model:    Feature dimension.
+        depths:     List of depths to test (default: [2,4,8,12,16,24,32]).
+        n_samples:  Number of random input vectors.
+        norm_mode:  Normalization mode (default 'none' to isolate α effect).
+        seed:       Random seed.
+
+    Returns:
+        Dict with:
+          'depths': list of L values
+          'alpha_1':        {'correlation': [...], 'cos_sim': [...]}
+          'alpha_inv_sqrt': {'correlation': [...], 'cos_sim': [...]}
+    """
+    if depths is None:
+        depths = [2, 4, 8, 12, 16, 24, 32]
+
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal((n_samples, d_model))
+    input_sims = pairwise_cosine_similarity(X)
+
+    results: Dict[str, Any] = {"depths": depths}
+
+    for label, alpha_fn in [
+        ("alpha_1",        lambda L: 1.0),
+        ("alpha_inv_sqrt", lambda L: 1.0 / np.sqrt(L)),
+    ]:
+        corrs, cos_sims = [], []
+        for L in depths:
+            alpha = float(alpha_fn(L))
+            model = TransformerEncoder(
+                d_model, L, norm_mode=norm_mode, alpha1=alpha, alpha2=alpha, seed=0
+            )
+            feats = model.forward(X)
+
+            output_sims = pairwise_cosine_similarity(feats)
+            # Pearson correlation between input and output pairwise similarities
+            corr = float(np.corrcoef(input_sims, output_sims)[0, 1])
+            corrs.append(corr)
+            cos_sims.append(cosine_similarity_stats(feats)["mean"])
+
+        results[label] = {"correlation": corrs, "cos_sim": cos_sims}
+
+    return results

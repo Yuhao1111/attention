@@ -26,6 +26,30 @@ COLORS = {
     "SAN + AttnRes": "#3498db",
 }
 
+NORM_COLORS = {
+    "none":     "#e74c3c",
+    "post_ln":  "#e67e22",
+    "pre_ln":   "#2ecc71",
+    "rmsnorm":  "#3498db",
+}
+
+NORM_LABELS = {
+    "none":     "No Norm",
+    "post_ln":  "Post-LN",
+    "pre_ln":   "Pre-LN",
+    "rmsnorm":  "RMSNorm",
+}
+
+SCALE_COLORS = {
+    "alpha_1":        "#e74c3c",
+    "alpha_inv_sqrt": "#3498db",
+}
+
+SCALE_LABELS = {
+    "alpha_1":        r"$\alpha = 1$",
+    "alpha_inv_sqrt": r"$\alpha = 1/\sqrt{L}$",
+}
+
 ACTIVATION_COLORS = {
     "MLP+relu": "#e74c3c",
     "MLP+sigmoid": "#9b59b6",
@@ -246,3 +270,137 @@ def plot_cosine_histogram(
     ax.legend()
 
     _save(fig, filename, out_dir)
+
+
+# ---------------------------------------------------------------------------
+# Fig 5: Transformer Rank Collapse vs Depth
+# ---------------------------------------------------------------------------
+
+def plot_transformer_rank_collapse(
+    results: Dict[str, Any],
+    out_dir: str = "figures",
+):
+    """Three-panel plot of Transformer rank collapse metrics vs depth.
+
+    Shows cos_sim, effective rank, and relative residual as the number
+    of Transformer blocks increases.  Reproduces qualitatively the
+    signal-propagation analysis of Noci et al. (2022).
+    """
+    _setup_style()
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    layers = results["n_layers"]
+    color = "#9b59b6"
+
+    panels = [
+        ("cos_sim",      "Avg. Cosine Similarity",  "Cosine Similarity vs Depth"),
+        ("eff_rank",     "Effective Rank",           "Effective Rank vs Depth"),
+        ("rel_residual", "Relative Residual",        "Relative Residual vs Depth"),
+    ]
+
+    for ax, (key, ylabel, title) in zip(axes, panels):
+        ax.plot(layers, results[key], color=color, marker="o", markersize=4)
+        ax.set_xlabel("Number of Transformer blocks")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+
+    fig.suptitle(
+        "Transformer Rank Collapse vs Depth  (Noci et al., 2022)",
+        fontsize=15, fontweight="bold", y=1.02,
+    )
+    fig.tight_layout()
+    _save(fig, "exp5_transformer_rank_collapse", out_dir)
+
+
+# ---------------------------------------------------------------------------
+# Fig 6: Normalization Mode Comparison
+# ---------------------------------------------------------------------------
+
+def plot_norm_comparison(
+    results: Dict[str, Dict],
+    out_dir: str = "figures",
+):
+    """Compare none / post_ln / pre_ln / rmsnorm across three rank metrics.
+
+    Three subplots, each with four lines (one per normalization mode).
+    """
+    _setup_style()
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    panels = [
+        ("cos_sim",      "Avg. Cosine Similarity",  "Cosine Similarity vs Depth"),
+        ("eff_rank",     "Effective Rank",           "Effective Rank vs Depth"),
+        ("rel_residual", "Relative Residual",        "Relative Residual vs Depth"),
+    ]
+
+    n_layers = None
+    for ax, (key, ylabel, title) in zip(axes, panels):
+        for norm, data in results.items():
+            values = data[key]
+            if n_layers is None:
+                n_layers = list(range(1, len(values) + 1))
+            color = NORM_COLORS.get(norm, "#333333")
+            label = NORM_LABELS.get(norm, norm)
+            ax.plot(n_layers, values, label=label, color=color, marker="o",
+                    markersize=3)
+        ax.set_xlabel("Number of Transformer blocks")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend(fontsize=9)
+
+    fig.suptitle(
+        "Effect of Normalization on Rank Collapse in Transformers",
+        fontsize=15, fontweight="bold", y=1.02,
+    )
+    fig.tight_layout()
+    _save(fig, "exp6_norm_comparison", out_dir)
+
+
+# ---------------------------------------------------------------------------
+# Fig 7: Residual Scaling  α=1  vs  α=1/√L
+# ---------------------------------------------------------------------------
+
+def plot_residual_scaling(
+    results: Dict[str, Any],
+    out_dir: str = "figures",
+):
+    """Two-panel plot comparing α=1 vs α=1/√L residual scaling.
+
+    Left panel:  Pearson correlation between input and output pairwise
+                 cosine similarities (higher = better signal preservation).
+    Right panel: Average output cosine similarity (lower = less collapsed).
+    """
+    _setup_style()
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    depths = results["depths"]
+
+    for label in ("alpha_1", "alpha_inv_sqrt"):
+        data  = results[label]
+        color = SCALE_COLORS[label]
+        name  = SCALE_LABELS[label]
+
+        axes[0].plot(depths, data["correlation"], label=name, color=color,
+                     marker="o", markersize=5)
+        axes[1].plot(depths, data["cos_sim"],     label=name, color=color,
+                     marker="s", markersize=5)
+
+    axes[0].set_xlabel("Depth $L$")
+    axes[0].set_ylabel("Pearson Correlation (input vs output pairwise sim)")
+    axes[0].set_title("Similarity Structure Preservation vs Depth")
+    axes[0].set_ylim(-0.1, 1.05)
+    axes[0].axhline(y=1.0, color="gray", linestyle=":", linewidth=1)
+    axes[0].legend()
+
+    axes[1].set_xlabel("Depth $L$")
+    axes[1].set_ylabel("Avg. Pairwise Cosine Similarity")
+    axes[1].set_title("Output Rank Collapse vs Depth")
+    axes[1].set_ylim(-0.05, 1.05)
+    axes[1].legend()
+
+    fig.suptitle(
+        r"Residual Scaling: $\alpha=1$ vs $\alpha=1/\sqrt{L}$  (Noci et al., 2022)",
+        fontsize=15, fontweight="bold", y=1.02,
+    )
+    fig.tight_layout()
+    _save(fig, "exp7_residual_scaling", out_dir)

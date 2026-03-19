@@ -327,3 +327,214 @@ def build_model(name: str, **kwargs):
     if name not in MODEL_REGISTRY:
         raise ValueError(f"Unknown model: {name}. Choose from {list(MODEL_REGISTRY)}")
     return MODEL_REGISTRY[name](**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Transformer Block  (self-attention + FFN + residual + normalization)
+# ---------------------------------------------------------------------------
+
+def _layer_norm(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+    """LayerNorm along the last axis."""
+    mean = x.mean(axis=-1, keepdims=True)
+    var = x.var(axis=-1, keepdims=True)
+    return (x - mean) / np.sqrt(var + eps)
+
+
+class TransformerBlock:
+    """Single Transformer block: self-attention + FFN + residual connections.
+
+    Forward pass depending on norm_mode:
+
+        none:
+            Z    = X + α1 * Attn(X)
+            out  = Z + α2 * FFN(Z)
+
+        post_ln:
+            Z    = LayerNorm(X + α1 * Attn(X))
+            out  = LayerNorm(Z + α2 * FFN(Z))
+
+        pre_ln:
+            Z    = X + α1 * Attn(LayerNorm(X))
+            out  = Z + α2 * FFN(LayerNorm(Z))
+
+        rmsnorm:
+            Z    = X + α1 * Attn(RMSNorm(X))
+            out  = Z + α2 * FFN(RMSNorm(Z))
+
+    All weights are Xavier-initialized: W ~ N(0, 1/d_model).
+
+    Reference:
+        Noci et al., "Signal Propagation in Transformers" (2022).
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: Optional[int] = None,
+        norm_mode: str = "pre_ln",
+        alpha1: float = 1.0,
+        alpha2: float = 1.0,
+        seed: int = 0,
+    ):
+        assert norm_mode in ("none", "post_ln", "pre_ln", "rmsnorm"), (
+            f"norm_mode must be one of: none, post_ln, pre_ln, rmsnorm. Got: {norm_mode}"
+        )
+        self.d_model = d_model
+        self.d_ff = d_ff if d_ff is not None else 4 * d_model
+        self.norm_mode = norm_mode
+        self.alpha1 = alpha1
+        self.alpha2 = alpha2
+
+        rng = np.random.default_rng(seed)
+        scale_attn = 1.0 / d_model        # Xavier for attention projections
+        scale_ff1  = 1.0 / d_model        # Xavier for FFN first layer
+        scale_ff2  = 1.0 / self.d_ff      # Xavier for FFN second layer
+
+        # Self-attention projections  (d_model → d_model each)
+        self.W_Q = rng.normal(0, np.sqrt(scale_attn), (d_model, d_model))
+        self.W_K = rng.normal(0, np.sqrt(scale_attn), (d_model, d_model))
+        self.W_V = rng.normal(0, np.sqrt(scale_attn), (d_model, d_model))
+        self.W_O = rng.normal(0, np.sqrt(scale_attn), (d_model, d_model))
+
+        # FFN:  d_model → d_ff → d_model
+        self.W1 = rng.normal(0, np.sqrt(scale_ff1), (self.d_ff, d_model))
+        self.b1 = rng.normal(0, np.sqrt(scale_ff1), (self.d_ff,))
+        self.W2 = rng.normal(0, np.sqrt(scale_ff2), (d_model, self.d_ff))
+        self.b2 = rng.normal(0, np.sqrt(scale_ff2), (d_model,))
+
+    # ------------------------------------------------------------------
+    # Sub-layer helpers
+    # ------------------------------------------------------------------
+
+    def _attn(self, X: np.ndarray) -> np.ndarray:
+        """Scaled dot-product self-attention: softmax(QK^T / sqrt(d_k)) V W_O."""
+        Q = X @ self.W_Q.T                          # (N, d_model)
+        K = X @ self.W_K.T
+        V = X @ self.W_V.T
+
+        scale = np.sqrt(self.d_model)
+        scores = Q @ K.T / scale                    # (N, N)
+
+        # Numerically stable softmax along key dimension
+        scores -= scores.max(axis=-1, keepdims=True)
+        weights = np.exp(scores)
+        weights /= weights.sum(axis=-1, keepdims=True)
+
+        out = weights @ V                           # (N, d_model)
+        return out @ self.W_O.T
+
+    def _ffn(self, X: np.ndarray) -> np.ndarray:
+        """FFN: Linear + ReLU + Linear."""
+        h = X @ self.W1.T + self.b1
+        h = np.maximum(h, 0.0)                     # ReLU
+        return h @ self.W2.T + self.b2
+
+    def _norm(self, X: np.ndarray) -> np.ndarray:
+        """Apply the block's normalization (used for pre-norm variants)."""
+        if self.norm_mode in ("pre_ln", "post_ln"):
+            return _layer_norm(X)
+        elif self.norm_mode == "rmsnorm":
+            return rms_norm(X)
+        return X  # none — identity
+
+    # ------------------------------------------------------------------
+    # Forward
+    # ------------------------------------------------------------------
+
+    def forward(self, X: np.ndarray) -> np.ndarray:
+        """Apply one Transformer block.
+
+        Args:
+            X: (N, d_model) token/sample feature matrix.
+
+        Returns:
+            (N, d_model) updated features.
+        """
+        if self.norm_mode == "post_ln":
+            Z   = _layer_norm(X + self.alpha1 * self._attn(X))
+            out = _layer_norm(Z + self.alpha2 * self._ffn(Z))
+        elif self.norm_mode in ("pre_ln", "rmsnorm"):
+            Z   = X + self.alpha1 * self._attn(self._norm(X))
+            out = Z + self.alpha2 * self._ffn(self._norm(Z))
+        else:  # none
+            Z   = X + self.alpha1 * self._attn(X)
+            out = Z + self.alpha2 * self._ffn(Z)
+        return out
+
+    def __repr__(self):
+        return (
+            f"TransformerBlock(d={self.d_model}, d_ff={self.d_ff}, "
+            f"norm={self.norm_mode}, α1={self.alpha1:.3f}, α2={self.alpha2:.3f})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Transformer Encoder  (stack of TransformerBlocks)
+# ---------------------------------------------------------------------------
+
+class TransformerEncoder:
+    """Stack of TransformerBlocks for feature convergence experiments.
+
+    Supports the same forward(X, return_intermediates=True) interface as MLP.
+
+    Args:
+        d_model:    Token/feature dimension.
+        n_layers:   Number of Transformer blocks.
+        d_ff:       FFN hidden dimension (default: 4 × d_model).
+        norm_mode:  One of "none", "post_ln", "pre_ln", "rmsnorm".
+        alpha1:     Residual scale for the attention branch (default 1.0).
+                    Set to 1/√n_layers for the depth-scaled variant from
+                    Noci et al. (2022).
+        alpha2:     Residual scale for the FFN branch (default 1.0).
+        seed:       Master random seed; each block gets a derived seed.
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        n_layers: int,
+        d_ff: Optional[int] = None,
+        norm_mode: str = "pre_ln",
+        alpha1: float = 1.0,
+        alpha2: float = 1.0,
+        seed: int = 0,
+    ):
+        self.d_model = d_model
+        self.n_layers = n_layers
+        self.norm_mode = norm_mode
+        self.alpha1 = alpha1
+        self.alpha2 = alpha2
+
+        rng = np.random.default_rng(seed)
+        self.blocks: List[TransformerBlock] = [
+            TransformerBlock(
+                d_model, d_ff, norm_mode, alpha1, alpha2,
+                seed=int(rng.integers(1 << 31)),
+            )
+            for _ in range(n_layers)
+        ]
+
+    def forward(self, X: np.ndarray, return_intermediates: bool = False):
+        """Forward pass through all Transformer blocks.
+
+        Args:
+            X:                   (N, d_model) input features.
+            return_intermediates: If True, return list of features at every
+                                  layer (including the input as index 0).
+
+        Returns:
+            Output features, or list of features at each layer.
+        """
+        intermediates = [X] if return_intermediates else None
+        h = X
+        for block in self.blocks:
+            h = block.forward(h)
+            if return_intermediates:
+                intermediates.append(h)
+        return intermediates if return_intermediates else h
+
+    def __repr__(self):
+        return (
+            f"TransformerEncoder(d={self.d_model}, L={self.n_layers}, "
+            f"norm={self.norm_mode}, α1={self.alpha1:.3f}, α2={self.alpha2:.3f})"
+        )

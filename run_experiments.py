@@ -11,6 +11,9 @@ Experiments:
     2. Residual connection comparison: MLP vs ResidualMLP vs AttnResMLP
     3. Layer-wise relative residual (rank collapse analysis)
     4. Random seed sensitivity (different cones)
+    5. Transformer rank collapse vs depth  (Noci et al., 2022)
+    6. Normalization mode comparison: none/post_ln/pre_ln/rmsnorm
+    7. Residual scaling: α=1 vs α=1/√L
 """
 
 import argparse
@@ -23,6 +26,9 @@ from src.experiments import (
     exp2_residual_comparison,
     exp3_layerwise_residual,
     exp4_seed_sensitivity,
+    exp5_transformer_rank_collapse,
+    exp6_norm_comparison,
+    exp7_residual_scaling,
 )
 from src.plotting import (
     plot_cone_effect,
@@ -30,6 +36,9 @@ from src.plotting import (
     plot_layerwise_residual,
     plot_seed_cones,
     plot_cosine_histogram,
+    plot_transformer_rank_collapse,
+    plot_norm_comparison,
+    plot_residual_scaling,
 )
 from src.models import MLP
 from src.metrics import cosine_similarity_stats
@@ -135,6 +144,70 @@ def run_exp4(out_dir: str = "figures"):
     print(f"\n  Time: {time.time() - t0:.1f}s")
 
 
+def run_exp5(out_dir: str = "figures"):
+    """Experiment 5: Transformer Rank Collapse vs Depth."""
+    separator("Exp 5: Transformer Rank Collapse vs Depth")
+    print("  Reference: Noci et al. (2022), arXiv:2206.03126")
+    print("  Model: TransformerEncoder (pre_ln), Xavier init\n")
+
+    t0 = time.time()
+    results = exp5_transformer_rank_collapse(
+        d_model=256, max_layers=24, n_samples=300, norm_mode="pre_ln", seed=42,
+    )
+    plot_transformer_rank_collapse(results, out_dir)
+
+    final = results["n_layers"][-1]
+    print(f"  depth={final}  cos_sim={results['cos_sim'][-1]:.4f}  "
+          f"eff_rank={results['eff_rank'][-1]:.1f}  "
+          f"rel_residual={results['rel_residual'][-1]:.4f}")
+    print(f"\n  Time: {time.time() - t0:.1f}s")
+
+
+def run_exp6(out_dir: str = "figures"):
+    """Experiment 6: Normalization Mode Comparison."""
+    separator("Exp 6: Normalization Mode Comparison")
+    print("  Comparing: none / post_ln / pre_ln / rmsnorm")
+    print("  Metrics: cosine similarity, effective rank, relative residual\n")
+
+    t0 = time.time()
+    results = exp6_norm_comparison(
+        d_model=256, max_layers=16, n_samples=300, seed=42,
+    )
+    plot_norm_comparison(results, out_dir)
+
+    for norm, data in results.items():
+        print(f"  {norm:8s}  depth=16  cos_sim={data['cos_sim'][-1]:.4f}  "
+              f"eff_rank={data['eff_rank'][-1]:.1f}  "
+              f"rel_residual={data['rel_residual'][-1]:.4f}")
+    print(f"\n  Time: {time.time() - t0:.1f}s")
+
+
+def run_exp7(out_dir: str = "figures"):
+    """Experiment 7: Residual Scaling α=1 vs α=1/√L."""
+    separator("Exp 7: Residual Scaling — α=1 vs α=1/√L")
+    print("  Reference: Noci et al. (2022) §4, depth-scaled residuals")
+    print("  Metric: Pearson corr(input pairwise sim, output pairwise sim)\n")
+
+    t0 = time.time()
+    results = exp7_residual_scaling(
+        d_model=256,
+        depths=[2, 4, 8, 12, 16, 24, 32],
+        n_samples=300,
+        norm_mode="none",
+        seed=42,
+    )
+    plot_residual_scaling(results, out_dir)
+
+    for label in ("alpha_1", "alpha_inv_sqrt"):
+        display = "α=1    " if label == "alpha_1" else "α=1/√L "
+        corrs = results[label]["correlation"]
+        for L, c in zip(results["depths"], corrs):
+            pass  # iterate to get last
+        print(f"  {display}  L=32  corr={corrs[-1]:.4f}  "
+              f"cos_sim={results[label]['cos_sim'][-1]:.4f}")
+    print(f"\n  Time: {time.time() - t0:.1f}s")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -143,12 +216,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--exp", nargs="*", type=int, default=None,
-                        help="Which experiments to run (1-4). Default: all.")
+                        help="Which experiments to run (1-7). Default: all.")
     parser.add_argument("--out-dir", default="figures",
                         help="Output directory for figures.")
     args = parser.parse_args()
 
-    exps = args.exp if args.exp else [1, 2, 3, 4]
+    exps = args.exp if args.exp else [1, 2, 3, 4, 5, 6, 7]
     out_dir = args.out_dir
 
     print("Feature Convergence & Residual Connection Experiments")
@@ -156,7 +229,10 @@ def main():
     print(f"Output directory: {out_dir}/")
     print(f"Running experiments: {exps}")
 
-    runners = {1: run_exp1, 2: run_exp2, 3: run_exp3, 4: run_exp4}
+    runners = {
+        1: run_exp1, 2: run_exp2, 3: run_exp3, 4: run_exp4,
+        5: run_exp5, 6: run_exp6, 7: run_exp7,
+    }
     for e in exps:
         if e in runners:
             runners[e](out_dir)
