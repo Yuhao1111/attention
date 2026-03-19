@@ -1,0 +1,248 @@
+"""Visualization functions for experiment results.
+
+All figures are saved to the `figures/` directory.
+Style: clean, publication-ready, with consistent color scheme.
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+from typing import Dict, List, Any, Optional
+from pathlib import Path
+
+# Use non-interactive backend
+matplotlib.use("Agg")
+
+# ---------------------------------------------------------------------------
+# Global style
+# ---------------------------------------------------------------------------
+
+COLORS = {
+    "MLP (no residual)": "#e74c3c",
+    "ResidualMLP (h+f(h))": "#2ecc71",
+    "AttnResMLP (attention residual)": "#3498db",
+    "SAN (no residual)": "#e74c3c",
+    "SAN + skip": "#2ecc71",
+    "SAN + AttnRes": "#3498db",
+}
+
+ACTIVATION_COLORS = {
+    "MLP+relu": "#e74c3c",
+    "MLP+sigmoid": "#9b59b6",
+    "MLP+leaky_relu": "#e67e22",
+    "MLP+tanh": "#1abc9c",
+    "MLP+linear": "#95a5a6",
+}
+
+LINE_STYLES = {
+    "MLP+relu": "-",
+    "MLP+sigmoid": "--",
+    "MLP+leaky_relu": "-.",
+    "MLP+tanh": ":",
+    "MLP+linear": "-",
+}
+
+
+def _setup_style():
+    """Apply clean matplotlib style."""
+    plt.rcParams.update({
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "axes.grid": True,
+        "grid.alpha": 0.3,
+        "grid.linestyle": "--",
+        "font.size": 11,
+        "axes.labelsize": 13,
+        "axes.titlesize": 14,
+        "legend.fontsize": 10,
+        "lines.linewidth": 2.0,
+        "figure.dpi": 150,
+    })
+
+
+def _save(fig, name: str, out_dir: str = "figures"):
+    """Save figure to disk."""
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    path = Path(out_dir) / f"{name}.png"
+    fig.savefig(path, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+    print(f"  Saved: {path}")
+
+
+# ---------------------------------------------------------------------------
+# Fig 1: Cone Effect (cos sim vs depth, different activations)
+# ---------------------------------------------------------------------------
+
+def plot_cone_effect(
+    results: Dict[str, List],
+    out_dir: str = "figures",
+):
+    """Plot average cosine similarity vs number of layers.
+
+    Reproduces Fig.2(b) from 'Mind the Gap'.
+    """
+    _setup_style()
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    for label, data in results.items():
+        layers, sims = zip(*data)
+        color = ACTIVATION_COLORS.get(label, "#333333")
+        ls = LINE_STYLES.get(label, "-")
+        display_name = label.replace("MLP+", "n×(Linear+") + ")"
+        ax.plot(layers, sims, label=display_name, color=color, linestyle=ls,
+                marker="o", markersize=3)
+
+    ax.set_xlabel("Number of layers (n)")
+    ax.set_ylabel("Average cosine similarity")
+    ax.set_title("Cone Effect: Feature Similarity Increases with Depth")
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend(loc="lower right")
+    ax.axhline(y=0, color="gray", linestyle="-", linewidth=0.5)
+
+    _save(fig, "exp1_cone_effect", out_dir)
+
+
+# ---------------------------------------------------------------------------
+# Fig 2: Residual Comparison (3 subplots)
+# ---------------------------------------------------------------------------
+
+def plot_residual_comparison(
+    results: Dict[str, Dict],
+    out_dir: str = "figures",
+):
+    """Plot cosine similarity, effective rank, and relative residual.
+
+    Three subplots comparing MLP / ResidualMLP / AttnResMLP.
+    """
+    _setup_style()
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    metrics = [
+        ("cos_sim", "Avg. Cosine Similarity", "Cosine Similarity vs Depth"),
+        ("eff_rank", "Effective Rank", "Effective Rank vs Depth"),
+        ("rel_residual", "Relative Residual", "Relative Residual vs Depth"),
+    ]
+
+    for ax, (metric_key, ylabel, title) in zip(axes, metrics):
+        for label, data in results.items():
+            values = data[metric_key]
+            layers = list(range(1, len(values) + 1))
+            color = COLORS.get(label, "#333333")
+            ax.plot(layers, values, label=label, color=color, marker="o",
+                    markersize=3)
+        ax.set_xlabel("Number of layers")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend(fontsize=9)
+
+    fig.suptitle(
+        "Residual Connections Mitigate Feature Convergence",
+        fontsize=15, fontweight="bold", y=1.02,
+    )
+    fig.tight_layout()
+    _save(fig, "exp2_residual_comparison", out_dir)
+
+
+# ---------------------------------------------------------------------------
+# Fig 3: Layer-wise Relative Residual
+# ---------------------------------------------------------------------------
+
+def plot_layerwise_residual(
+    results: Dict[str, List[float]],
+    out_dir: str = "figures",
+):
+    """Plot relative residual at each layer.
+
+    Reproduces Fig.2 from 'Attention is not all you need' (Dong et al.).
+    """
+    _setup_style()
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    for label, rr_values in results.items():
+        layers = list(range(len(rr_values)))
+        color = COLORS.get(label, "#333333")
+        ls = "--" if "no residual" in label else "-"
+        ax.plot(layers, rr_values, label=label, color=color, linestyle=ls,
+                marker="o", markersize=4)
+
+    ax.set_xlabel("Layer index $l$")
+    ax.set_ylabel(r"$\|res(X_l)\|_{1,\infty} \;/\; \|X_l\|_{1,\infty}$")
+    ax.set_title("Layer-wise Relative Residual (Rank Collapse Indicator)")
+    ax.legend()
+    ax.set_ylim(-0.05, 1.10)
+
+    _save(fig, "exp3_layerwise_residual", out_dir)
+
+
+# ---------------------------------------------------------------------------
+# Fig 4: Seed Sensitivity (PCA visualization)
+# ---------------------------------------------------------------------------
+
+def plot_seed_cones(
+    data: Dict[str, Any],
+    out_dir: str = "figures",
+):
+    """PCA visualization of features from different random seeds.
+
+    Reproduces Fig.2(c) from 'Mind the Gap'.
+    """
+    _setup_style()
+    features_list = data["features"]
+    seeds = data["seeds"]
+
+    # Stack all features and compute joint PCA
+    all_feats = np.vstack(features_list)
+    mean = all_feats.mean(axis=0)
+    centered = all_feats - mean
+    _, _, Vt = np.linalg.svd(centered, full_matrices=False)
+    proj = centered @ Vt[:2].T  # Project onto top-2 PCs
+
+    # Split back
+    n_per_seed = features_list[0].shape[0]
+    fig, ax = plt.subplots(figsize=(8, 7))
+
+    cmap = plt.cm.tab10
+    for i, s in enumerate(seeds):
+        start = i * n_per_seed
+        end = start + n_per_seed
+        xy = proj[start:end]
+        ax.scatter(xy[:, 0], xy[:, 1], s=8, alpha=0.5,
+                   color=cmap(i % 10), label=f"seed={s}")
+
+    ax.set_xlabel("PC 1")
+    ax.set_ylabel("PC 2")
+    ax.set_title("Different Random Seeds → Different Cones (PCA)")
+    ax.legend(markerscale=3, fontsize=8, ncol=2, loc="best")
+
+    _save(fig, "exp4_seed_cones", out_dir)
+
+
+# ---------------------------------------------------------------------------
+# Fig 5: Cosine Similarity Histogram
+# ---------------------------------------------------------------------------
+
+def plot_cosine_histogram(
+    features: np.ndarray,
+    title: str = "Pairwise Cosine Similarity",
+    label: str = "",
+    out_dir: str = "figures",
+    filename: str = "cosine_hist",
+):
+    """Histogram of pairwise cosine similarities."""
+    from .metrics import pairwise_cosine_similarity
+
+    _setup_style()
+    sims = pairwise_cosine_similarity(features)
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.hist(sims, bins=80, color="#3498db", alpha=0.7, edgecolor="white",
+            linewidth=0.3)
+    avg = np.mean(sims)
+    ax.axvline(avg, color="#e74c3c", linestyle="--", linewidth=2,
+               label=f"Mean={avg:.3f}")
+    ax.set_xlabel("Cosine Similarity")
+    ax.set_ylabel("Count")
+    ax.set_title(f"{title}" + (f" ({label})" if label else ""))
+    ax.legend()
+
+    _save(fig, filename, out_dir)
