@@ -123,6 +123,7 @@ def exp2_residual_comparison(
         d_hidden:   Hidden dimension.
         max_layers: Maximum depth.
         n_samples:  Number of input samples.
+        alpha:      Residual scaling for ResidualMLP, using h + alpha * f(h).
         seed:       Random seed.
 
     Returns:

@@ -74,6 +74,13 @@ LINE_STYLES = {
 }
 
 
+def _series_color(label: str) -> str:
+    """Return a consistent color, including dynamic ResidualMLP labels."""
+    if label.startswith("ResidualMLP"):
+        return COLORS["ResidualMLP (h+f(h))"]
+    return COLORS.get(label, "#333333")
+
+
 def _setup_style():
     """Apply clean matplotlib style."""
     plt.rcParams.update({
@@ -158,7 +165,7 @@ def plot_residual_comparison(
         for label, data in results.items():
             values = data[metric_key]
             layers = list(range(1, len(values) + 1))
-            color = COLORS.get(label, "#333333")
+            color = _series_color(label)
             ax.plot(layers, values, label=label, color=color, marker="o",
                     markersize=3)
         ax.set_xlabel("Number of layers")
