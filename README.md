@@ -22,25 +22,40 @@ This repository provides experiments to verify these phenomena and demonstrate t
 ### Exp 1: Cone Effect Verification
 Reproduces **Fig.2(b)** from *Mind the Gap*. Shows that average pairwise cosine similarity of features increases rapidly with depth for MLPs with nonlinear activations.
 
+![Exp 1: Cone Effect](figures/exp1_cone_effect.png)
+
 ### Exp 2: Residual Connection Comparison
 Compares **Plain MLP** vs **ResidualMLP** (`h + f(h)`) vs **AttnResMLP** (attention over depth). Measures cosine similarity, effective rank, and relative residual across depth.
+
+![Exp 2: Residual Comparison](figures/exp2_residual_comparison.png)
 
 ### Exp 3: Layer-wise Rank Collapse
 Reproduces **Fig.2** from *Attention is not all you need*. Measures relative residual at each layer, showing how pure attention collapses to rank-1 while skip connections prevent this.
 
+![Exp 3: Layer-wise Residual](figures/exp3_layerwise_residual.png)
+
 ### Exp 4: Random Seed Sensitivity
 Reproduces **Fig.2(c)** from *Mind the Gap*. Different random initializations create distinctly different cones, explaining the modality gap phenomenon.
+
+![Exp 4: Seed Cones](figures/exp4_seed_cones.png)
+![Exp 4: Cosine Histogram](figures/exp4_cosine_hist.png)
 
 ### Exp 5: Transformer Rank Collapse vs Depth
 Measures cosine similarity, effective rank, and relative residual at the output of a `TransformerEncoder` (Pre-LN, Xavier init) as depth grows from 1 to 24 blocks. Illustrates the rank-collapse dynamics analyzed theoretically in Noci et al. (2022).
 
+![Exp 5: Transformer Rank Collapse](figures/exp5_transformer_rank_collapse.png)
+
 ### Exp 6: Normalization Mode Comparison
 Compares the four normalization strategies — **none**, **Post-LN**, **Pre-LN**, and **RMSNorm** — on all three rank-collapse metrics across depth. Pre-LN and RMSNorm are expected to best preserve effective rank, consistent with findings in Noci et al. (2022).
+
+![Exp 6: Norm Comparison](figures/exp6_norm_comparison.png)
 
 ### Exp 7: Residual Scaling α=1 vs α=1/√L
 For each total depth L ∈ {2, 4, 8, 12, 16, 24, 32}, compares the standard residual (α=1) against the depth-scaled variant (α=1/√L) proposed in Noci et al. (2022) §4.
 **Metric:** Pearson correlation between the vectors of pairwise cosine similarities at the input and at the output — a value near 1 means the model faithfully preserves the input similarity structure.
 With α=1/√L, each layer's contribution is kept at the same relative scale regardless of total depth, preventing the residual stream from drowning out the attention signal.
+
+![Exp 7: Residual Scaling](figures/exp7_residual_scaling.png)
 
 ## Usage
 
