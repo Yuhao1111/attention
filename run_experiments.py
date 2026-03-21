@@ -25,6 +25,7 @@ from pathlib import Path
 from src.experiments import (
     exp1_cone_effect,
     exp2_residual_comparison,
+    exp2b_alpha_sweep,
     exp3_layerwise_residual,
     exp4_seed_sensitivity,
     exp5_transformer_rank_collapse,
@@ -35,6 +36,7 @@ from src.experiments import (
 from src.plotting import (
     plot_cone_effect,
     plot_residual_comparison,
+    plot_alpha_sweep,
     plot_layerwise_residual,
     plot_seed_cones,
     plot_cosine_histogram,
@@ -74,36 +76,43 @@ def run_exp1(out_dir: str = "figures"):
 
 
 def run_exp2(out_dir: str = "figures"):
-    """Experiment 2: Residual Connection Comparison."""
+    """Experiment 2: Residual Connection Comparison (3-model core)."""
     separator("Exp 2: Residual Connection Comparison")
-    print("  Comparing: MLP / ResidualMLP(α=1) / ResidualMLP(α=1/√L) / ResidualMLP(α=0.1) / AttnRes+MLP / Pure Self-Attn")
-    print("  d=1024, max_layers=20, n_samples=300")
-    print("  BUG FIX: alpha now scales f(h), not the skip — h = h_old + alpha * f(h_old)\n")
+    print("  MLP (no residual) / ResidualMLP (α=0.1) / AttnRes + MLP (no self-attn)")
+    print("  d=1024, max_layers=20, n_samples=300\n")
 
     t0 = time.time()
-    max_layers = 20
     results = exp2_residual_comparison(
-        d_input=1024, d_hidden=1024, max_layers=max_layers, n_samples=300, seed=42,
+        d_input=1024, d_hidden=1024, max_layers=20, n_samples=300, seed=42,
     )
     plot_residual_comparison(results, out_dir)
 
-    # Print summary at final depth with effective alpha
-    print(f"  {'Model':42s}  {'alpha@L=20':>10}  cos_sim  eff_rank  rel_res")
-    print(f"  {'-'*42}  {'-'*10}  -------  --------  -------")
-    alpha_map = {
-        "MLP (no residual)":            "N/A",
-        "ResidualMLP (α=1)":            "1.000",
-        "ResidualMLP (α=1/√L)":         f"{1.0/np.sqrt(max_layers):.3f}",
-        "ResidualMLP (α=0.1)":          "0.100",
-        "AttnRes + MLP (no self-attn)": "N/A",
-        "Pure Self-Attention":          "N/A",
-    }
+    print(f"  {'Model':42s}  cos_sim  eff_rank  rel_res")
+    print(f"  {'-'*42}  -------  --------  -------")
     for label, data in results.items():
-        cs = data["cos_sim"][-1]
-        er = data["eff_rank"][-1]
-        rr = data["rel_residual"][-1]
-        alpha_str = alpha_map.get(label, "?")
-        print(f"  {label:42s}  {alpha_str:>10}  {cs:.3f}    {er:6.1f}    {rr:.4f}")
+        print(f"  {label:42s}  {data['cos_sim'][-1]:.3f}    "
+              f"{data['eff_rank'][-1]:6.1f}    {data['rel_residual'][-1]:.4f}")
+
+    print(f"\n  Time: {time.time() - t0:.1f}s")
+
+
+def run_exp9(out_dir: str = "figures"):
+    """Experiment 9 (exp2b): Alpha sweep for ResidualMLP."""
+    separator("Exp 9 (2b): ResidualMLP Alpha Sweep")
+    print("  α ∈ {0.01, 0.05, 0.10, 0.20, 0.50, 1.00, 1/√L}")
+    print("  d=1024, max_layers=20, n_samples=300\n")
+
+    t0 = time.time()
+    results = exp2b_alpha_sweep(
+        d_input=1024, d_hidden=1024, max_layers=20, n_samples=300, seed=42,
+    )
+    plot_alpha_sweep(results, out_dir)
+
+    print(f"  {'Label':12s}  eff_rank@L=5  eff_rank@L=10  eff_rank@L=20")
+    print(f"  {'─'*12}  {'─'*12}  {'─'*13}  {'─'*13}")
+    for label in results["alpha_labels"]:
+        er = results[label]["eff_rank"]
+        print(f"  {label:12s}  {er[4]:12.1f}  {er[9]:13.1f}  {er[19]:13.1f}")
 
     print(f"\n  Time: {time.time() - t0:.1f}s")
 
@@ -267,7 +276,7 @@ def main():
                         help="Output directory for figures.")
     args = parser.parse_args()
 
-    exps = args.exp if args.exp else [1, 2, 3, 4, 5, 6, 7, 8]
+    exps = args.exp if args.exp else [1, 2, 3, 4, 5, 6, 7, 8, 9]
     out_dir = args.out_dir
 
     print("Feature Convergence & Residual Connection Experiments")
@@ -277,7 +286,7 @@ def main():
 
     runners = {
         1: run_exp1, 2: run_exp2, 3: run_exp3, 4: run_exp4,
-        5: run_exp5, 6: run_exp6, 7: run_exp7, 8: run_exp8,
+        5: run_exp5, 6: run_exp6, 7: run_exp7, 8: run_exp8, 9: run_exp9,
     }
     for e in exps:
         if e in runners:

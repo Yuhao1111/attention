@@ -101,63 +101,103 @@ def exp2_residual_comparison(
     n_samples: int = 300,
     seed: int = 42,
 ) -> Dict[str, Any]:
-    """Compare rank collapse across five model types.
+    """Core three-way comparison of residual strategies vs depth.
 
-    Measures:
-    - Average cosine similarity (cone effect)
-    - Effective rank
-    - Relative residual (token uniformity)
+    Models:
+      MLP (no residual)          — baseline, expected cone effect
+      ResidualMLP (α=0.1)        — skip connection with h = h + 0.1·f(h)
+      AttnRes + MLP (no self-attn) — depth-wise softmax attention residual
 
-    across depths for:
-      MLP / ResidualMLP(α=1) / ResidualMLP(α=1/√L) / AttnResMLP / PureSelfAttention
-
-    The α=1/√L variant follows Noci et al. (2022) §4: for a network of
-    total depth L, every skip connection is scaled by 1/√L so that the
-    effective per-layer contribution stays constant regardless of depth.
-
-    The Pure Self-Attention baseline (no residual, no FFN) exhibits
-    doubly-exponential rank collapse as proved by Dong et al. (2021).
-
-    Args:
-        d_input:    Input dimension.
-        d_hidden:   Hidden dimension.
-        max_layers: Maximum depth.
-        n_samples:  Number of input samples.
-        alpha:      Residual scaling for ResidualMLP, using h + alpha * f(h).
-        seed:       Random seed.
+    Metrics: cosine similarity, effective rank, relative residual.
 
     Returns:
         Dict mapping model_name -> {'cos_sim', 'eff_rank', 'rel_residual'}.
     """
     rng = np.random.default_rng(seed)
-    X = rng.standard_normal((n_samples, d_input))
-
-    results = {}
+    X   = rng.standard_normal((n_samples, d_input))
     common = dict(d_input=d_input, d_hidden=d_hidden, activation="relu", seed=0)
 
+    results = {}
     for n_layers in range(1, max_layers + 1):
         builders = {
-            "MLP (no residual)": lambda L=n_layers: MLP(
+            "MLP (no residual)":             lambda L=n_layers: MLP(
                 n_layers=L, **common),
-            "ResidualMLP (α=1)": lambda L=n_layers: ResidualMLP(
-                n_layers=L, alpha=1.0, **common),
-            "ResidualMLP (α=1/√L)": lambda L=n_layers: ResidualMLP(
-                n_layers=L, alpha=1.0 / np.sqrt(L), **common),
-            "ResidualMLP (α=0.1)": lambda L=n_layers: ResidualMLP(
+            "ResidualMLP (α=0.1)":           lambda L=n_layers: ResidualMLP(
                 n_layers=L, alpha=0.1, **common),
-            "AttnRes + MLP (no self-attn)": lambda L=n_layers: AttnResMLP(
+            "AttnRes + MLP (no self-attn)":  lambda L=n_layers: AttnResMLP(
                 n_layers=L, **common),
-            "Pure Self-Attention": lambda L=n_layers: PureSelfAttention(
-                d_input=d_input, d_hidden=d_hidden, n_layers=L, seed=0),
         }
-
         for label, build in builders.items():
-            model = build()
-            feats = model.forward(X, return_intermediates=True)[-1]
-            entry = results.setdefault(label, {"cos_sim": [], "eff_rank": [], "rel_residual": []})
+            feats = build().forward(X, return_intermediates=True)[-1]
+            entry = results.setdefault(
+                label, {"cos_sim": [], "eff_rank": [], "rel_residual": []})
             entry["cos_sim"].append(cosine_similarity_stats(feats)["mean"])
             entry["eff_rank"].append(effective_rank(feats))
             entry["rel_residual"].append(relative_residual(feats))
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Experiment 2b: Alpha Sweep for ResidualMLP
+# ---------------------------------------------------------------------------
+
+def exp2b_alpha_sweep(
+    d_input: int = 1024,
+    d_hidden: int = 1024,
+    max_layers: int = 20,
+    n_samples: int = 300,
+    alphas: List[float] = None,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """Sweep residual scaling α for ResidualMLP, measuring eff_rank vs depth.
+
+    Fixed alphas are tested alongside the depth-adaptive α=1/√L variant.
+    This lets the advisor see the full sensitivity of rank preservation to α.
+
+    Args:
+        alphas:  Fixed α values to test (default [0.01, 0.05, 0.10, 0.20, 0.50, 1.00]).
+        others:  Same as exp2_residual_comparison.
+
+    Returns:
+        Dict with:
+          'n_layers':     list of depths
+          'alpha_labels': ordered list of label strings (fixed + "α=1/√L")
+          per label:      {'eff_rank': [...]}
+    """
+    if alphas is None:
+        alphas = [0.01, 0.05, 0.10, 0.20, 0.50, 1.00]
+
+    rng    = np.random.default_rng(seed)
+    X      = rng.standard_normal((n_samples, d_input))
+    common = dict(d_input=d_input, d_hidden=d_hidden, activation="relu", seed=0)
+
+    fixed_labels  = [f"α={a:.2f}" for a in alphas]
+    dynamic_label = "α=1/√L"
+    alpha_labels  = fixed_labels + [dynamic_label]
+
+    results: Dict[str, Any] = {
+        "n_layers":     list(range(1, max_layers + 1)),
+        "alpha_labels": alpha_labels,
+    }
+
+    # Fixed-alpha lines
+    for a, label in zip(alphas, fixed_labels):
+        eff_ranks = []
+        for n_layers in range(1, max_layers + 1):
+            model = ResidualMLP(n_layers=n_layers, alpha=a, **common)
+            feats = model.forward(X, return_intermediates=True)[-1]
+            eff_ranks.append(effective_rank(feats))
+        results[label] = {"eff_rank": eff_ranks}
+
+    # Dynamic α=1/√L line
+    eff_ranks = []
+    for n_layers in range(1, max_layers + 1):
+        alpha = 1.0 / np.sqrt(n_layers)
+        model = ResidualMLP(n_layers=n_layers, alpha=alpha, **common)
+        feats = model.forward(X, return_intermediates=True)[-1]
+        eff_ranks.append(effective_rank(feats))
+    results[dynamic_label] = {"eff_rank": eff_ranks}
 
     return results
 
