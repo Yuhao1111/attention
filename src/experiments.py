@@ -143,6 +143,8 @@ def exp2_residual_comparison(
                 n_layers=L, alpha=1.0, **common),
             "ResidualMLP (α=1/√L)": lambda L=n_layers: ResidualMLP(
                 n_layers=L, alpha=1.0 / np.sqrt(L), **common),
+            "ResidualMLP (α=0.1)": lambda L=n_layers: ResidualMLP(
+                n_layers=L, alpha=0.1, **common),
             "AttnRes + MLP (no self-attn)": lambda L=n_layers: AttnResMLP(
                 n_layers=L, **common),
             "Pure Self-Attention": lambda L=n_layers: PureSelfAttention(

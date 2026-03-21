@@ -76,21 +76,34 @@ def run_exp1(out_dir: str = "figures"):
 def run_exp2(out_dir: str = "figures"):
     """Experiment 2: Residual Connection Comparison."""
     separator("Exp 2: Residual Connection Comparison")
-    print("  Comparing: MLP / ResidualMLP(α=1) / ResidualMLP(α=1/√L) / AttnResMLP / Pure Self-Attention")
-    print("  Metrics: cosine similarity, effective rank, relative residual\n")
+    print("  Comparing: MLP / ResidualMLP(α=1) / ResidualMLP(α=1/√L) / ResidualMLP(α=0.1) / AttnRes+MLP / Pure Self-Attn")
+    print("  d=1024, max_layers=20, n_samples=300")
+    print("  BUG FIX: alpha now scales f(h), not the skip — h = h_old + alpha * f(h_old)\n")
 
     t0 = time.time()
+    max_layers = 20
     results = exp2_residual_comparison(
-        d_input=1024, d_hidden=1024, max_layers=20, n_samples=300, seed=42,
+        d_input=1024, d_hidden=1024, max_layers=max_layers, n_samples=300, seed=42,
     )
     plot_residual_comparison(results, out_dir)
 
-    # Print summary at final depth
+    # Print summary at final depth with effective alpha
+    print(f"  {'Model':42s}  {'alpha@L=20':>10}  cos_sim  eff_rank  rel_res")
+    print(f"  {'-'*42}  {'-'*10}  -------  --------  -------")
+    alpha_map = {
+        "MLP (no residual)":            "N/A",
+        "ResidualMLP (α=1)":            "1.000",
+        "ResidualMLP (α=1/√L)":         f"{1.0/np.sqrt(max_layers):.3f}",
+        "ResidualMLP (α=0.1)":          "0.100",
+        "AttnRes + MLP (no self-attn)": "N/A",
+        "Pure Self-Attention":          "N/A",
+    }
     for label, data in results.items():
         cs = data["cos_sim"][-1]
         er = data["eff_rank"][-1]
         rr = data["rel_residual"][-1]
-        print(f"  {label:40s}  cos_sim={cs:.3f}  eff_rank={er:.1f}  rel_res={rr:.4f}")
+        alpha_str = alpha_map.get(label, "?")
+        print(f"  {label:42s}  {alpha_str:>10}  {cs:.3f}    {er:6.1f}    {rr:.4f}")
 
     print(f"\n  Time: {time.time() - t0:.1f}s")
 

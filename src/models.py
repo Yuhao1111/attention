@@ -185,7 +185,7 @@ class ResidualMLP:
             residual = h
             h = h @ W.T + b
             h = self.act_fn(h)
-            h = self.alpha * residual + h  # Scaled skip connection
+            h = residual + self.alpha * h  # h = h_old + alpha * f(h_old)
             if return_intermediates:
                 intermediates.append(h)
 

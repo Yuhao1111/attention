@@ -22,6 +22,7 @@ COLORS = {
     "MLP (no residual)":        "#e74c3c",
     "ResidualMLP (α=1)":        "#2ecc71",
     "ResidualMLP (α=1/√L)":     "#27ae60",
+    "ResidualMLP (α=0.1)":      "#f39c12",
     "AttnResMLP":                       "#3498db",
     "AttnRes + MLP (no self-attn)":     "#3498db",
     "Pure Self-Attention":      "#8e44ad",
