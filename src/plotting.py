@@ -486,3 +486,129 @@ def plot_init_variance(
     )
     fig.tight_layout()
     _save(fig, "exp8_init_variance", out_dir)
+
+
+# ---------------------------------------------------------------------------
+# MNIST Training Curves
+# ---------------------------------------------------------------------------
+
+TRAINING_COLORS = {
+    "PlainMLP":              "#e74c3c",
+    "ResidualMLP (α=0.1)":   "#f39c12",
+    "AttnResMLP":            "#3498db",
+}
+
+
+def plot_training_curves(
+    histories: Dict[str, Any],
+    out_dir: str = "figures",
+):
+    """Four-panel training curves: loss, accuracy, cosine similarity, eff rank.
+
+    Args:
+        histories: dict mapping model_name → history dict from train_model().
+    """
+    _setup_style()
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes = axes.flatten()
+
+    panels = [
+        ("train_loss",  "Train Loss",              "Training Loss"),
+        ("test_acc",    "Test Accuracy",            "Test Accuracy"),
+        ("cos_sim",     "Avg. Cosine Similarity",   "Feature Cosine Similarity (cone effect)"),
+        ("eff_rank",    "Effective Rank",           "Effective Rank of Final-Layer Features"),
+    ]
+
+    for ax, (key, ylabel, title) in zip(axes, panels):
+        for name, h in histories.items():
+            color = TRAINING_COLORS.get(name, "#333333")
+            epochs = list(range(1, len(h[key]) + 1))
+            ax.plot(epochs, h[key], label=name, color=color, marker="o", markersize=3)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend(fontsize=9)
+
+    fig.suptitle(
+        "MNIST Training: PlainMLP vs ResidualMLP(α=0.1) vs AttnResMLP",
+        fontsize=15, fontweight="bold",
+    )
+    fig.tight_layout()
+    _save(fig, "mnist_training_curves", out_dir)
+
+
+# ---------------------------------------------------------------------------
+# AttnRes Attention Weight Heatmap  (Fig.8 style)
+# ---------------------------------------------------------------------------
+
+def plot_attn_heatmap(
+    attn_before: "np.ndarray",
+    attn_after: "np.ndarray",
+    n_layers: int = 8,
+    out_dir: str = "figures",
+):
+    """Side-by-side heatmaps of AttnResMLP attention weight matrix.
+
+    Reproduces the style of AttnRes paper Fig.8.
+
+    Args:
+        attn_before: (n_layers+1, n_layers+1) weight matrix before training.
+        attn_after:  (n_layers+1, n_layers+1) weight matrix after training.
+        n_layers:    number of transform layers.
+        out_dir:     output directory.
+
+    The matrix is lower triangular: entry (l, i) = mean softmax weight of
+    source layer i when computing the aggregation for query l.
+    Rows 0..n_layers-1 are transform queries; row n_layers is the output query.
+    """
+    _setup_style()
+
+    # Mask out upper triangle (invalid entries) with NaN for clean display
+    def _mask(mat):
+        m = mat.copy().astype(float)
+        for row in range(n_layers + 1):
+            m[row, row + 1:] = np.nan
+        return m
+
+    before = _mask(attn_before)
+    after  = _mask(attn_after)
+
+    # Tick labels
+    src_labels = [f"h{i}" for i in range(n_layers + 1)]
+    qry_labels = [f"q{l}" for l in range(n_layers)] + ["q_out"]
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    vmax = max(after[~np.isnan(after)].max(), 0.01)
+
+    for ax, mat, title in [
+        (axes[0], before, "Before training  (uniform)"),
+        (axes[1], after,  "After training   (learned)"),
+    ]:
+        im = ax.imshow(mat, aspect="auto", cmap="Blues",
+                       vmin=0, vmax=vmax, interpolation="nearest")
+        ax.set_xticks(range(n_layers + 1))
+        ax.set_xticklabels(src_labels, fontsize=9)
+        ax.set_yticks(range(n_layers + 1))
+        ax.set_yticklabels(qry_labels, fontsize=9)
+        ax.set_xlabel("Source layer  $h_i$")
+        ax.set_ylabel("Query  $q_l$  (target layer)")
+        ax.set_title(title)
+
+        # Annotate cells with weight values (hide NaN entries)
+        for row in range(n_layers + 1):
+            for col in range(row + 1):
+                val = mat[row, col]
+                if not np.isnan(val):
+                    txt_color = "white" if val > vmax * 0.6 else "black"
+                    ax.text(col, row, f"{val:.2f}", ha="center", va="center",
+                            fontsize=7, color=txt_color)
+
+        plt.colorbar(im, ax=ax, shrink=0.8, label="Mean softmax weight")
+
+    fig.suptitle(
+        r"AttnResMLP Depth-wise Attention Weights  $\alpha_{i \rightarrow l}$"
+        "\n(reproduces AttnRes paper Fig.8)",
+        fontsize=14, fontweight="bold",
+    )
+    fig.tight_layout()
+    _save(fig, "mnist_attn_heatmap", out_dir)
